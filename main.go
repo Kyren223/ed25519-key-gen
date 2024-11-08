@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 )
+
+const goroutines = 12
 
 func main() {
 	keywords := getKeywords()
@@ -22,50 +25,66 @@ func main() {
 		fmt.Println("File error:", err)
 	}
 
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-
 	fmt.Println("Keywords: ", keywords)
+	fmt.Println("Goroutines: ", goroutines)
 	fmt.Println("Starting to search...")
 
-	start := time.Now()
-	generated := 0
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var generated [goroutines]int64
 	found := 0
+	start := time.Now()
 
-outer:
-	for {
-		select {
-		case <-signalChan:
-			fmt.Println("Interrupt")
-			break outer
-		default:
-			pubKey, privKey, err := ed25519.GenerateKey(nil)
-			if err != nil {
-				fmt.Println("Encountered error:", err)
-				break
-			}
-			generated++
-			pubBase64 := base64.StdEncoding.EncodeToString(pubKey)
-			for _, keyword := range keywords {
-				if strings.Contains(pubBase64, keyword) {
-					found++
-					privBase64 := base64.StdEncoding.EncodeToString(privKey)
-					fmt.Println("Found", keyword, pubBase64)
-					_, err := output.WriteString(fmt.Sprintln(keyword, pubBase64, privBase64))
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			signalChan := make(chan os.Signal, 1)
+			signal.Notify(signalChan, os.Interrupt)
+
+			for {
+				select {
+				case <-signalChan:
+					return
+				default:
+					pubKey, privKey, err := ed25519.GenerateKey(nil)
 					if err != nil {
-						fmt.Println("Error writing string to output file:", err)
-						fmt.Println("Private Key:", privKey)
+						fmt.Println("Encountered error:", err)
+						break
 					}
-					break
+					generated[i]++
+					pubBase64 := base64.StdEncoding.EncodeToString(pubKey)
+					for _, keyword := range keywords {
+						if strings.Contains(pubBase64, keyword) {
+							mu.Lock()
+							found++
+							privBase64 := base64.StdEncoding.EncodeToString(privKey)
+							fmt.Println(i, "Found", keyword, pubBase64)
+							_, err := output.WriteString(fmt.Sprintln(keyword, pubBase64, privBase64))
+							if err != nil {
+								fmt.Println("Error writing string to output file:", err)
+								fmt.Println("Private Key:", privKey)
+							}
+							mu.Unlock()
+							break
+						}
+					}
 				}
 			}
-		}
+		}()
+	}
+
+	wg.Wait()
+
+	searched := int64(0)
+	for _, gen := range generated {
+		searched += gen
 	}
 
 	elapsed := time.Since(start)
 	fmt.Println("Completed Search")
 	fmt.Println("Time Elapsed:", elapsed)
-	fmt.Println("Searched:", generated, "Found:", found)
+	fmt.Println("Searched:", searched, "Found:", found)
 }
 
 func getKeywords() []string {
