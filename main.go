@@ -11,15 +11,10 @@ import (
 )
 
 func main() {
-	keywords := []string{
-		"Kyren",
-		"kyren",
-		"KYREN",
-		"Kyren223",
-		"kyren223",
-		"KYREN223",
-		"Banana",
-		"banana",
+	keywords := getKeywords()
+	if len(keywords) == 0 {
+		fmt.Println("No keywords")
+		return
 	}
 
 	output, err := os.OpenFile("output.txt", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
@@ -29,6 +24,9 @@ func main() {
 
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
+
+	fmt.Println("Keywords: ", keywords)
+	fmt.Println("Starting to search...")
 
 	start := time.Now()
 	generated := 0
@@ -68,4 +66,32 @@ outer:
 	fmt.Println("Completed Search")
 	fmt.Println("Time Elapsed:", elapsed)
 	fmt.Println("Searched:", generated, "Found:", found)
+}
+
+func getKeywords() []string {
+	var keywords []string
+	args := os.Args[1:]
+	if len(args) == 0 {
+		file, err := os.ReadFile("input.txt")
+		if err != nil {
+			fmt.Println(err)
+			return nil
+		}
+		contents := strings.ReplaceAll(string(file), "\r\n", "\n")
+		for _, keyword := range strings.Split(contents, "\n") {
+			keyword = strings.TrimSpace(keyword)
+			if len(keyword) != 0 {
+				keywords = append(keywords, keyword)
+			}
+		}
+	} else {
+		for _, keyword := range args {
+			keyword = strings.TrimSpace(keyword)
+			if len(keyword) != 0 {
+				keywords = append(keywords, keyword)
+			}
+		}
+	}
+
+	return keywords
 }
