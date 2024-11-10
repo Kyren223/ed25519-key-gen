@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
@@ -9,12 +10,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 const goroutines = 12
 
 func main() {
-	keywords := getKeywords()
+	keywordsStrings := getKeywords()
+	var keywords [][]byte
+	for _, keyword := range keywordsStrings {
+		keywords = append(keywords, []byte(keyword))
+	}
 	if len(keywords) == 0 {
 		fmt.Println("No keywords")
 		return
@@ -25,7 +32,7 @@ func main() {
 		fmt.Println("File error:", err)
 	}
 
-	fmt.Println("Keywords: ", keywords)
+	fmt.Println("Keywords: ", keywordsStrings)
 	fmt.Println("Goroutines: ", goroutines)
 	fmt.Println("Starting to search...")
 
@@ -52,15 +59,22 @@ func main() {
 						fmt.Println("Encountered error:", err)
 						break
 					}
+					sshPubKey, err := ssh.NewPublicKey(pubKey)
+					if err != nil {
+						fmt.Println("Encountered error:", err)
+						break
+					}
+					pub := ssh.MarshalAuthorizedKey(sshPubKey)[37:]
+					pub = pub[:len(pub)-1]
 					generated[i]++
-					pubBase64 := base64.StdEncoding.EncodeToString(pubKey)
 					for _, keyword := range keywords {
-						if strings.Contains(pubBase64, keyword) {
+						if bytes.Contains(pub, keyword) {
 							mu.Lock()
 							found++
 							privBase64 := base64.StdEncoding.EncodeToString(privKey)
-							fmt.Println(i, "Found", keyword, pubBase64)
-							_, err := output.WriteString(fmt.Sprintln(keyword, pubBase64, privBase64))
+							pubBase64 := base64.StdEncoding.EncodeToString(pubKey)
+							fmt.Printf("%X Found %s %s\n", i, string(keyword), string(pub))
+							_, err := output.WriteString(fmt.Sprintln(string(keyword), "AAAAC3NzaC1lZDI1NTE5AAAAI"+string(pub), privBase64, pubBase64))
 							if err != nil {
 								fmt.Println("Error writing string to output file:", err)
 								fmt.Println("Private Key:", privKey)
@@ -113,4 +127,25 @@ func getKeywords() []string {
 	}
 
 	return keywords
+}
+
+// Failed, no keys still contained their keywords
+func update() {
+	a, _ := os.ReadFile("a.txt")
+	lines := strings.Split(strings.ReplaceAll(string(a), "\r\n", "\n"), "\n")
+	var newLines []string
+	for _, line := range lines {
+		split := strings.Split(line, " ")
+		if len(split) != 3 {
+			continue
+		}
+		keyword, pub, _ := split[0], split[1], split[2]
+		b, _ := base64.StdEncoding.DecodeString(pub)
+		key, _ := ssh.NewPublicKey(ed25519.PublicKey(b))
+		sshKey := ssh.MarshalAuthorizedKey(key)
+		if bytes.Contains(sshKey, []byte(keyword)) {
+			newLines = append(newLines, string(sshKey))
+		}
+	}
+	os.WriteFile("b.txt", []byte(strings.Join(newLines, "\n")), 0o644)
 }
