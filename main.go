@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const goroutines = 12
+const goroutines = 50
 
 func main() {
 	keywordsStrings := getKeywords()
